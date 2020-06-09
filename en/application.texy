@@ -98,7 +98,7 @@ class ProductPresenter extends Nette\Application\UI\Presenter
 {
 	private $repository;
 
-	public function __constructor(ProductRepository $repository)
+	public function __construct(ProductRepository $repository)
 	{
 		$this->repository = $repository;
 	}
