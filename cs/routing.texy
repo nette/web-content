@@ -3,147 +3,136 @@ Routování
 
 <div class=perex>
 
-Routování je obousměrné překládání mezi URL a akcí presenteru. Obousměrným myslíme možnost z URL odvodit akci presenteru, ale také obráceně, k akci vygenerovat odpovídající URL. Ukážeme si:
+Router má na starosti vše kolem podoby URL adres, aby vy už jste nad nimi nemuseli přemýšlet. Ukážeme si:
 
-- jak zapisovat routy a vytvářet odkazy
-- povíme si o SEO přesměrování
-- jak routy debugovat
-- jak napsat vlastní router
+- jak nastavit router, aby URL byly podle vašich představ
+- povíme si o SEO a přesměrování
+- a ukážeme si, jak napsat vlastní router
 
 </div>
 
 
+Lidštější URL (nebo taky cool, pretty či user-friendly URL) jsou použitelnější a zapamatovatelnější a pozitivně přispívají k SEO((optimalizaci nalezitelnosti na internetu)). Nette Framework na to myslí a vychází vývojářům plně vstříc.
 
-Co je routování?
-================
+Začneme technicky. Router je objekt implementující rozhraní [api:Nette\Routing\Router], který umí rozložit URL na pole parametrů (metoda `match()`) a obráceně z pole parametrů sestavit URL (metoda `constructUrl()`). Proto se taky říká, že router je obousměrný.
+Nette dává možnost velice elegantním způsobem definovat pravidla, jak přesně má router fungovat, tedy, jak mají URL naší aplikace vypadat.
 
-Routování je obousměrné překládání mezi URL a **polem parametrů**.
-
-- `Nette\Http\IRequest` (obsahuje URL) -> pole
-- pole -> absolutní URL
-
-Díky obousměrnému routování už nemusíme do šablon natvrdo zapisovat URL, odkazujeme se pouze na akce presenterů a framework nám už URL vygeneruje sám:
+Router se obvykle používá v kombinaci s [Nette Application|application#Nette Application], která se získaným polem parametrů dále pracuje, zejména tedy s parametry `presenter`, `action` a `do`, které určují presenter, akci a signál.
+A dále využívá router pro generování URL v šabloně, kde zapíšeme třeba:
 
 ```html
-{* vytvoří odkaz na presenter presenter 'Product' a jeho akci 'detail' *}
 <a n:href="Product:detail $productId">detail produktu</a>
 ```
 
-Více se dozvíte na stránce o [vytváření odkazů |link-generation].
+a router už sám sestaví z těchto parametrů URL. Více se dočtete v kapitole [vytváření odkazů |link-generation].
 
-Routování představuje **samostatnou vrstvu aplikace**. Tvar URL můžeme vymýšlet klidně až ve chvíli, když je celá aplikace hotová. Stejně tak je velmi snadné je kdykoliv změnit. A přitom nejen zachovat původní adresy v platnosti, ale automaticky je nechat přesměrovávat na URL nová. Ruku na srdce, kdo z vás to má? :-)
+Ovšem router není limitován pro tohle využití, můžete jej úplně stejně použít pro jakékoliv jiné nasazení, pro REST API, pro aplikace, kde se vůbec presentery nepoužívají atd. Více v části [#samostatné použití].
+
+Routování tedy představuje samostatnou a velmi pokrokovou vrstvu aplikace. Díky němu můžeme tvary URL vymýšlet klidně až ve chvíli, když je celá aplikace hotová. Stejně tak je velmi snadné je kdykoliv změnit. Což dává vývojářům obrovskou svobodu.
 
 
-SimpleRouter
+Kolekce rout
 ============
 
-Požadovaný tvar URL adres určuje *router*. Nejjednodušším případem routeru je [SimpleRouter |api:Nette\Application\Routers\SimpleRouter]. Použijeme jej tehdy, pokud nemáme zvláštní nároky na tvar URL, pokud není k dispozici `mod_rewrite` (nebo jeho alternativy) nebo pokud zatím nechceme řešit *hezké* URL.
+Nejpohodlnější způsob, jak definovat podobu URL, dává třída `Nette\Routing\RouteList`, resp. její potomek `Nette\Application\Routers\RouteList`, který navíc doplňuje podporu pro presentery, což se nám hodí. Velkou výhodou je, že celý router
+se definuje na jednom místě pomocí PHP kódu a není tak roztroušen ve formě anotací v jednotlivých presenterech.
 
-Generované adresy budou zhruba v tomto tvaru:
-
-```
-http://example.com/?presenter=Product&action=detail&id=123
-```
-
-Prvním parametrem konstruktoru SimpleRouteru je výchozí akce presenteru, tj. akce, která se má provést, pokud otevřeme stránku např. `http://example.com/` bez dalších parametrů.
+Základem je definice tzv. rout, tedy jednotlivých adres URL a k nim přidružených presenterů a akcí pomocí jednoduchého API:
 
 ```php
-// výchozím presenterem bude 'Homepage' a akcí 'default'
-$router = new Nette\Application\Routers\SimpleRouter('Homepage:default');
+$router = new Nette\Application\Routers\RouteList;
+// URL https://example.com/article/123  zavolá Article:view a id=123
+$router->addRoute('article/<id>', 'Article:view');
+// URL https://example.com/rss.xml  zavolá Feed:rss
+$router->addRoute('rss.xml', 'Feed:rss');
 ```
 
-Doporučovaným způsobem konfigurace rout v aplikaci je zaregistrování SimpleRouteru v [konfiguračním souboru |configuring#sluzby]:
+Všimněte si, že routy nemusíme nijak pojmenovávat.
+
+Abychom takto vytvořený router zapojili do celé aplikace, musíme o něm říct DI kontejneru. Nejsnazší cesta je připravit továrnu, která objekt routeru vyrobí, a sdělit v konfiguraci kontejneru, aby ji použil. Tak dejme tomu, že vyrobíme metodu `App\Router\RouterFactory::createRouter()`:
+
+```php
+namespace App\Router;
+
+use Nette\Application\Routers\RouteList;
+
+class RouterFactory
+{
+	public static function createRouter(): RouteList
+	{
+		$router = new RouteList;
+		$router->addRoute(...);
+		return $router;
+	}
+}
+```
+
+A do konfiguračního souboru zapíšeme:
 
 ```neon
 services:
-	application.router: Nette\Application\Routers\SimpleRouter('Homepage:default')
+	router: App\Router\RouterFactory::createRouter
 ```
 
-
-Route: za hezčí URL .{toc: Route}
-=================================
-
-Lidštější URL (nebo taky cool, pretty či user-friendly URL) bývají použitelnější a zapamatovatelnější a pozitivně přispívají k SEO((optimalizaci nalezitelnosti na internetu)). Nette Framework na současné trendy myslí a vychází v tomto vývojářům plně vstříc.
-
-Všechny požadavky musí být zpracovávány souborem `index.php`. Toho můžeme dosáhnout napříkad konfigurací mod_rewrite při použití Apache nebo direktivou `try_files` pokud používáme Nginx (viz [jak nastavit server pro hezká URL |troubleshooting#jak-nastavit-server-pro-hezka-url]) .
-
-Třídu [Route |api:Nette\Application\Routers\Route] je možné použít k vytváření adres takřka libovolného tvaru. Začněme příkladem, který bude generovat pro akci `Product:detail` s `id = 123` URL v tomto tvaru:
-
-```
-http://example.com/product/detail/123
-```
-
-Vytvoříme objekt `Route` (tzv. routu), jehož prvním parametrem je maska cesty a druhým výchozí akce presenteru zapsaná jako řetězec nebo pole. Třetím parametrem mohou být dodatečné příznaky.
+Jakékoliv závislosti, třeba na databázi atd, lze předávat do tovární metody jako její parametry:
 
 ```php
-// výchozí akcí bude presenter Homepage a akce default
-$route = new Route('<presenter>/<action>[/<id>]', 'Homepage:default');
-
-// alternativně zapsáno polem
-$route = new Route('<presenter>/<action>[/<id>]', [
-	'presenter' => 'Homepage',
-	'action'    => 'default'
-]);
+public static function createRouter(Nette\Database\Connection $db, bool $debugMode = false): RouteList
+{
+	...
+}
 ```
 
-Uvedená routa je použitelná pro libovolné presentery a akce. Akceptuje cestu např. ve tvaru `/article/edit/10` nebo také `/catalog/list`, protože část s parameterem `id` je uzavřena do hranatých závorek, čímž říkáme, že je nepovinná.
+V případě nenalezení routy se vyhodí výjimka [BadRequestException |api:Nette\Application\BadRequestException], která se uživateli zobrazí jako stránka 404 Not Found.
 
-Protože i ostatní parametry (presenter, action) mají výchozí hodnotu (tj. `Homepage` a `default`), jsou volitelné. Pokud jejich hodnota bude shodná s výchozí, v URL se vynechají. Takže odkaz na `Product:default` vygeneruje cestu `http://example.com/product`, odkaz na výchozí `Homepage:default` cestu `http://example.com/`.
 
 Maska cesty
 -----------
 
+RouterList je možné použít k vytváření adres libovolného tvaru. Popisují se pomocí tzv. rout, jejímž prvním parametrem je maska cesty a druhým výchozí akce presenteru zapsaná jako řetězec nebo pole. Třetím parametrem může být [příznak|#Jednosměrky ONE_WAY].
+
 Nejjednodušší maskou je **statická URL** s uvedenou cílovou akcí presenteru.
 
 ```php
-$route = new Route('products', 'Products:default');
+$router->addRoute('products', 'Products:default');
 ```
 
 Většina reálných masek však obsahuje proměnlivé **parametry**. Ty jsou uvedeny ve špičatých závorkách (např. `<year>`) a jsou předány do cílového presenteru.
 
 ```php
-$route = new Route('history/<year>', 'History:view');
+$router->addRoute('history/<year>', 'History:view');
 ```
 
-Masky mohou také obsahovat tradiční GET parametry (parametry za otazníkem v URL). Pro tyto však nelze použít validační (např. regulární výraz) a další složitější struktury, nicméně můžeme určit, který parametr bude použit pod jakým názvem v aplikaci:
+Často se používají univerzální routy, jako například tato, kde výchozí akcí bude presenter Homepage a akce default:
 
 ```php
-// říkáme, že GET parameter "cat" chceme v aplikaci použít pod názvem "categoryId"
-$route = new Route('<presenter>/<action> ? id=<productId> & cat=<categoryId>', ...);
+$router->addRoute('<presenter>/<action>[/<id>]', 'Homepage:default');
 ```
 
-Parametry, které se v URL nachází před otazníkem, nazýváme parametry cesty, parametry za otazníkem jako parametry dotazu.
+Uvedená routa je použitelná pro libovolné presentery a akce. Akceptuje cestu např. ve tvaru `/article/edit/10` nebo také `/catalog/list`, protože část s parameterem `id` je uzavřena do hranatých závorek, čímž říkáme, že je nepovinná.
+
+Protože i ostatní parametry (presenter, action) mají výchozí hodnotu (tj. `Homepage` a `default`), jsou volitelné. Pokud jejich hodnota bude shodná s výchozí, v URL se vynechají. Takže odkaz na `Product:default` vygeneruje cestu `/product`, odkaz na výchozí `Homepage:default` cestu `/`.
 
 Maska může popisovat nejen relativní cestu od kořenového adresáře webu, ale také absolutní cestu (pokud začíná lomítkem) nebo dokonce celé absolutní URL (začíná-li dvěma lomítky):
 
 ```php
 // relativně k document rootu (složka www)
-$route = new Route('<presenter>/<action>', ...);
+$router->addRoute('<presenter>/<action>', ...);
 
 // absolutní cesta (relativní k doméně)
-$route = new Route('/<presenter>/<action>', ...);
+$router->addRoute('/<presenter>/<action>', ...);
 
 // absolutní URL včetně domény (relativní k schématu)
-$route = new Route('//<subdomain>.example.com/<presenter>/<action>', ...);
+$router->addRoute('//<subdomain>.example.com/<presenter>/<action>', ...);
 
 // absolutní URL včetně schématu
-$route = new Route('https://<subdomain>.example.com/<presenter>/<action>', ...);
+$router->addRoute('https://<subdomain>.example.com/<presenter>/<action>', ...);
 ```
 
-Zástupné znaky
---------------
+.[caution]
+Je důležité, v jakém pořadí jsou routy definovány, protože se zkouší postupně odshora dolů. Platí pravidlo, že **routy deklarujeme od specifických po obecné**.
 
-V masce absolutní cesty můžeme použít následující proměnné:
-- `%tld%` = top level domain, např. `com` nebo `org`
-- `%sld%` = second level domain, např. u `example.com` vrací `example`
-- `%domain%` = doména bez subdomény, např. `example.com`
-- `%host%` = celý host, např. `www.example.com`
-- `%basePath%` = absolutní URL cesta ke kořenovému adresáři
-
-```php
-$route = new Route('//www.%domain%/%basePath%/<presenter>/<action>', ...);
-$route = new Route('//www.%sld%.%tld%/%basePath%/<presenter>/<action', ...);
-```
+Pamatujte na to, že počet rout má vliv na rychlost aplikace, zejména při generování odkazů. Proto se vyplatí routovací tabulku zjednodušit.
 
 
 Výchozí hodnoty
@@ -152,20 +141,22 @@ Výchozí hodnoty
 Jednotlivým parametrům můžeme určit výchozí hodnotu přímo v masce:
 
 ```php
-$route = new Route('<presenter=Homepage>/<action=default>/<id=>');
+$router->addRoute('<presenter=Homepage>/<action=default>/<id=>');
 ```
 
 Nebo pomocí pole:
 
 ```php
-$route = new Route('<presenter>/<action>/<id>', [
+use Nette\Routing\Route;
+
+$router->addRoute('<presenter>/<action>/<id>', [
 	'presenter' => 'Homepage',
 	'action' => 'default',
 	'id' => null,
 ]);
 
 // je ekvivalentní s touto delší notací
-$route = new Route('<presenter>/<action>/<id>', [
+$router->addRoute('<presenter>/<action>/<id>', [
 	'presenter' => [
 		Route::VALUE => 'Homepage',
 	],
@@ -181,7 +172,7 @@ $route = new Route('<presenter>/<action>/<id>', [
 Výchozí hodnoty pro `<presenter>` a `<action>` mohou být také zapsány jako řetězec v druhém parametru konstruktoru:
 
 ```php
-$route = new Route('<presenter>/<action>/<id=>', 'Homepage:default');
+$router->addRoute('<presenter>/<action>/<id=>', 'Homepage:default');
 ```
 
 
@@ -191,11 +182,13 @@ Validační výrazy
 Dále lze určit validační podmínku pomocí regulárního výrazu. Například parametru `id` určíme, že může nabývat pouze číslic pomocí validační podmínky `[0-9]+`:
 
 ```php
+use Nette\Routing\Route;
+
 // regexp lze definovat přímo v masce cesty po názvu parametru
-$route = new Route('<presenter>/<action>[/<id \d+>]', 'Homepage:default');
+$router->addRoute('<presenter>/<action>[/<id \d+>]', 'Homepage:default');
 
 // je ekvivalentní s touto delší notací
-$route = new Route('<presenter>/<action>[/<id>]', [
+$router->addRoute('<presenter>/<action>[/<id>]', [
 	'presenter' => 'Homepage',
 	'action' => 'default',
 	'id' => [
@@ -207,13 +200,14 @@ $route = new Route('<presenter>/<action>[/<id>]', [
 .[note]
 Výchozí validační podmínkou je `[^/]+`, tj. vše kromě lomítka. Pokud má parametr přijímat i lomítka, uvedeme podmínku `.+`.
 
+
 Volitelné sekvence
 ------------------
 
 V masce lze označovat volitelné části pomocí hranatých závorek. Volitelná může být libovolná část masky, mohou se v ní nacházet i parametry:
 
 ```php
-$route = new Route('[<lang [a-z]{2}>/]<name>', 'Article:view');
+$router->addRoute('[<lang [a-z]{2}>/]<name>', 'Article:view');
 
 // Akceptuje cesty:
 //    /cs/download  => lang => cs, name => download
@@ -223,13 +217,13 @@ $route = new Route('[<lang [a-z]{2}>/]<name>', 'Article:view');
 Když je parametr součásti volitelné sekvence, stává se pochopitelně také volitelným s výchozí hodnotou null. Sekvence zároveň definuje jeho okolí, v tomto případě znak lomítka, které musí za parametrem, je-li uveden, následovat. Této techniky lze využít například u volitelných subdomén s jazykem:
 
 ```php
-$route = new Route('//[<lang=en>.]example.com/<presenter>/<action>', ...);
+$router->addRoute('//[<lang=en>.]example.com/<presenter>/<action>', ...);
 ```
 
 Sekvence je možné libovolně zanořovat a kombinovat:
 
 ```php
-$route = new Route(
+$router->addRoute(
 	'[<lang [a-z]{2}>[-<sublang>]/]<name>[/page-<page=0>]',
 	'Homepage:default'
 );
@@ -246,42 +240,42 @@ Při generování URL se usiluje o nejkratší URL, takže všechno, co lze vyne
 
 ```php
 // akceptuje /hello i /hello.html, generuje /hello
-$route = new Route('<name>[.html]');
+$router->addRoute('<name>[.html]');
 
 // akceptuje /hello i /hello.html, generuje /hello.html
-$route = new Route('<name>[!.html]');
+$router->addRoute('<name>[!.html]');
 ```
 
 
 Volitelné parametry (tj. parametry mající výchozí hodnotu) bez hranatých závorek se chovají v podstatě tak, jako by byly uzávorkovány následujícím způsobem:
 
 ```php
-$route = new Route('<presenter=Homepage>/<action=default>/<id=>');
+$router->addRoute('<presenter=Homepage>/<action=default>/<id=>');
 
 // odpovídá tomuto:
-$route = new Route('[<presenter=Homepage>/[<action=default>/[<id>]]]');
+$router->addRoute('[<presenter=Homepage>/[<action=default>/[<id>]]]');
 ```
 
 Pokud bychom chtěli ovlivnit chování koncového lomítka, aby se např. místo `/homepage/` generovalo jen `/homepage`, lze toho docílit takto:
 
 ```php
-$route = new Route('[<presenter=Homepage>[/<action=default>[/<id>]]]');
+$router->addRoute('[<presenter=Homepage>[/<action=default>[/<id>]]]');
 ```
 
 
-Foo parametry
--------------
+Zástupné znaky
+--------------
 
-Foo parametry jsou podobné volitelným sekvencím, slouží však k tomu, aby bylo možné do masky přidat regulární výraz. Příkladem je routa akceptující `/index`, `/index.html`, `/index.htm` a `/index.php`:
+V masce absolutní cesty můžeme použít následující proměnné:
+- `%tld%` = top level domain, např. `com` nebo `org`
+- `%sld%` = second level domain, např. u `example.com` vrací `example`
+- `%domain%` = doména bez subdomény, např. `example.com`
+- `%host%` = celý host, např. `www.example.com`
+- `%basePath%` = absolutní URL cesta ke kořenovému adresáři
 
 ```php
-$route = new Route('index<? \.html?|\.php|>', 'Homepage:default');
-```
-
-Lze také explicitně definovat řetězec, který bude při generování cesty použit (obdoba výchozí hodnoty u skutečných parametrů). Řetězec musí být umístěn přímo za otazníkem. Následující routa je podobná předchozí, ale generuje `/index.html` namísto `/index`, protože řetězec `.html` je nastaven jako výchozí hodnota:
-
-```php
-$route = new Route('index<?.html \.html?|\.php|>', 'Homepage:default');
+$router->addRoute('//www.%domain%/%basePath%/<presenter>/<action>', ...);
+$router->addRoute('//www.%sld%.%tld%/%basePath%/<presenter>/<action', ...);
 ```
 
 
@@ -291,7 +285,7 @@ Transformace a překlady
 Je záhodno psát zdrojové kódy v angličtině, ale co když má web běžet v českém prostředí? Pak jednoduché routování typu:
 
 ```php
-$route = new Route('<presenter>/<action>/<id>', [
+$router->addRoute('<presenter>/<action>/<id>', [
 	'presenter' => 'Homepage',
 	'action' => 'default',
 	'id' => null,
@@ -301,7 +295,9 @@ $route = new Route('<presenter>/<action>/<id>', [
 bude generovat anglické URL, jako třeba `/product/123`, `/cart` nebo `/catalog/view` apod. Pokud chceme mít presentery a akce v URL reprezentované českými slovy (např. `/produkt/123` nebo `/kosik`), můžeme využít překladového slovníku. Definice v poli rozšíříme:
 
 ```php
-$route = new Route('<presenter>/<action>/<id>', [
+use Nette\Routing\Route;
+
+$router->addRoute('<presenter>/<action>/<id>', [
 	'presenter' => [
 		Route::VALUE => 'Homepage',
 		Route::FILTER_TABLE => [
@@ -321,7 +317,6 @@ $route = new Route('<presenter>/<action>/<id>', [
 ]);
 ```
 
-
 .[tip]
 Jeden presenter může být uveden pod více různými klíči. Pak k němu povedou všechny varianty (tedy vytvoří se aliasy) s tím, že za kanonickou se považuje ta poslední.
 
@@ -331,9 +326,8 @@ Pokud chceme u parametru použít pouze překladový slovník, přídáme `FILTE
 
 Kromě překladového slovníku v podobě pole lze nasadit i vlastní překladové funkce a filtry.
 
-
 ```php
-$route = new Route('<presenter>/<action>/<id>', [
+$router->addRoute('<presenter>/<action>/<id>', [
 	'presenter' => [
 		Route::VALUE => 'Homepage',
 		Route::FILTER_IN => 'filterInFunc',
@@ -353,7 +347,7 @@ Jsou situace, kdy toto chování budeme chtít změnit, například pokud použi
 ```php
 // akceptuje http://files.example.com/path/to/my/file
 
-$route = new Route('//files.example.com/<path .+>', [
+$router->addRoute('//files.example.com/<path .+>', [
 	'presenter' => 'File',
 	'action' => 'default',
 	'path' => [
@@ -364,12 +358,16 @@ $route = new Route('//files.example.com/<path .+>', [
 ]);
 ```
 
+
 Globální filtry
 ---------------
+
 Vedle filtrů určených pro konkrétní parametry (`<presenter>`, `<action>`, ...) můžeme definovat též **globální filtry**, které akceptují asociativní pole se všemi parametry a vrací pole vyfiltrovaných parametrů. Globální filtry definujeme pod klíčem `null`.
 
 ```php
-$route = new Route('<presenter>/<action>', [
+use Nette\Routing\Route;
+
+$router->addRoute('<presenter>/<action>', [
 	'presenter' => 'Homepage',
 	'action' => 'default',
 	null => [
@@ -387,47 +385,6 @@ $route = new Route('<presenter>/<action>', [
 
 .[tip]
 Globální filtry můžeme použít též pro filtrování parametrů na základě jiných parametrů. Například přeložení `<presenter>` a `<action>` na základě parametru `<lang>`.
-
-
-Moduly
-------
-
-Presentery v Nette se mohou dělit do modulů. A proto potřebujeme i v routách pracovat s moduly. Pro to můžeme využít parametr `module` u třídy `Route`:
-
-```php
-// URL manage/dashboard/default se mapuje na presenter Admin:Dashboard
-new Route('manage/<presenter>/<action>', [
-	'module' => 'Admin'
-]);
-```
-
-
-
-Kolekce rout
-============
-
-Protože rout budeme zpravidla definovat více než jednu, spojíme je do [RouteList |api:Nette\Application\Routers\RouteList]. Routy nemusíme nijak pojmenovávat.
-
-```php
-use Nette\Application\Routers\Route;
-
-$router = new Nette\Application\Routers\RouteList;
-$router->add(new Route('rss.xml', 'Feed:rss'));
-$router->add(new Route('<presenter>/<action>', 'Homepage:default'));
-```
-
-Kód můžeme zjednodušit díky metodě `addRoute()`, která přidává do kolekce objekty `Nette\Application\Routers\Route`.
-
-```php
-$router = new Nette\Application\Routers\RouteList;
-$router->addRoute('rss.xml', 'Feed:rss');
-$router->addRoute('<presenter>/<action>', 'Homepage:default');
-```
-
-.[caution]
-Je důležité, v jakém pořadí jsou routy definovány, protože se zkouší postupně odshora dolů. Platí pravidlo, že **routy deklarujeme od specifických po obecné**.
-
-Pamatujte na to, že počet rout má vliv na rychlost aplikace, zejména při generování odkazů. Proto se vyplatí routovací tabulku zjednodušit.
 
 
 Jednosměrky ONE_WAY
@@ -458,6 +415,15 @@ $router->withModule('Forum') // následující routy jsou součástí modulu For
 
 	->withModule('Admin') // následující routy jsou součástí modulu Forum:Admin
 		->addRoute('sign:in', 'Sign:in');
+```
+
+Také můžeme využít parametr `module` u třídy `Route`:
+
+```php
+// URL manage/dashboard/default se mapuje na presenter Admin:Dashboard
+$router->addRoute('manage/<presenter>/<action>', [
+	'module' => 'Admin'
+]);
 ```
 
 Subdomény
@@ -515,53 +481,57 @@ $router = (new RouteList)
 ```
 
 
-Router Factory
-==============
+Query parametry
+---------------
 
-Doporučenou cestou pro konfiguraci rout aplikace je si napsat továrnu (například třídu `RouterFactory`) a zaregistrovat ji do [systémového DI containeru |configuring#sluzby] v konfiguračním souboru:
+Masky mohou také obsahovat tradiční GET parametry (parametry za otazníkem v URL). Pro tyto však nelze použít validační (např. regulární výraz) a další složitější struktury, nicméně můžeme určit, který parametr bude použit pod jakým názvem v aplikaci:
 
 ```php
-namespace App\Router;
-
-use Nette;
-use Nette\Application\Routers\RouteList;
-
-class RouterFactory
-{
-	use Nette\StaticClass;
-
-	public static function createRouter(): RouteList
-	{
-		$router = new RouteList;
-		$router->addRoute('article/<id>', 'Article:view');
-		$router->addRoute('rss.xml', 'Feed:rss');
-		$router->addRoute('<presenter>/<action>', 'Homepage:default');
-		return $router;
-	}
-}
+// říkáme, že GET parameter "cat" chceme v aplikaci použít pod názvem "categoryId"
+$router->addRoute('<presenter>/<action> ? id=<productId> & cat=<categoryId>', ...);
 ```
 
-Konfigurační soubor:
+
+Foo parametry
+-------------
+
+Foo parametry jsou podobné volitelným sekvencím, slouží však k tomu, aby bylo možné do masky přidat regulární výraz. Příkladem je routa akceptující `/index`, `/index.html`, `/index.htm` a `/index.php`:
+
+```php
+$router->addRoute('index<? \.html?|\.php|>', 'Homepage:default');
+```
+
+Lze také explicitně definovat řetězec, který bude při generování cesty použit (obdoba výchozí hodnoty u skutečných parametrů). Řetězec musí být umístěn přímo za otazníkem. Následující routa je podobná předchozí, ale generuje `/index.html` namísto `/index`, protože řetězec `.html` je nastaven jako výchozí hodnota:
+
+```php
+$router->addRoute('index<?.html \.html?|\.php|>', 'Homepage:default');
+```
+
+
+
+SimpleRouter
+============
+
+Mnohem jednodušší variantou než kolekce rout je [SimpleRouter |api:Nette\Application\Routers\SimpleRouter]. Použijeme jej tehdy, pokud nemáme zvláštní nároky na tvar URL, pokud není k dispozici `mod_rewrite` (nebo jeho alternativy) nebo pokud zatím nechceme řešit *hezké* URL.
+
+Generované adresy budou zhruba v tomto tvaru:
+
+```
+http://example.com/?presenter=Product&action=detail&id=123
+```
+
+Prvním parametrem konstruktoru SimpleRouteru je výchozí akce presenteru, tj. akce, která se má provést, pokud otevřeme stránku např. `http://example.com/` bez dalších parametrů.
+
+```php
+// výchozím presenterem bude 'Homepage' a akcí 'default'
+$router = new Nette\Application\Routers\SimpleRouter('Homepage:default');
+```
+
+Doporučovaným způsobem konfigurace rout v aplikaci je zaregistrování SimpleRouteru v [konfiguračním souboru |configuring#sluzby]:
 
 ```neon
 services:
-	router: App\Router\RouterFactory::createRouter
-```
-
-V případě nenalezení routy se vyhodí výjimka [BadRequestException |api:Nette\Application\BadRequestException], která se uživateli zobrazí jako stránka 404 Not Found.
-
-Jakékoliv závislosti, třeba na databázi, nebo příznak, lze předat do továrny routeru jako parametry:
-
-```php
-class RouterFactory
-{
-	public static function createRouter(Nette\Database\Connection $db, bool $debugMode = false): RouteList
-	{
-		$router = new RouteList;
-		$router->add(...);
-		return $router;
-	}
-}
+	application.router: Nette\Application\Routers\SimpleRouter('Homepage:default')
 ```
 
 
@@ -601,10 +571,10 @@ Pokud ale potřebujeme, aby jednotlivé routy běžely pod různými protokoly, 
 
 ```php
 // Bude generovat adresu s HTTP
-$route = new Route('http://%host%/<presenter>/<action>','Homepage:default');
+$router->addRoute('http://%host%/<presenter>/<action>','Homepage:default');
 
 // Bude generovat adresu s HTTPs
-$route = new Route('https://%host%/<presenter>/<action>','Admin:default');
+$router->addRoute('https://%host%/<presenter>/<action>','Admin:default');
 ```
 
 .[caution]
@@ -667,5 +637,11 @@ Metoda `match` zpracuje aktuální požadavek [$httpRequest |api:Nette\Http\Requ
 Metoda `constructUrl` naopak sestaví z pole parametrů výsledné absolutní URL. K tomu může využít informace z parametru `$refUrl`.
 
 Možnosti vlastního routeru jsou prakticky neomezené, lze třeba implementovat router, který bude routovat na základě databázové tabulky.
+
+
+Samostatné použití
+==================
+
+TODO
 
 {{composer: nette/application}}
